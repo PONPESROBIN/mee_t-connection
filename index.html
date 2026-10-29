@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PhoneLink</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+:root{--bg:#f2f5f2;--surf:#fff;--ink:#14201b;--mute:#5d6b64;--line:#cfd8d2;--acc:#0a6e6e;--onacc:#fff;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1514;--surf:#172120;--ink:#e6eeea;--mute:#92a39a;--line:#2b3a36;--acc:#3fd0b0;--onacc:#06201a;--bad:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:560px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:26px;margin:8px 0 4px}
+p{margin:0 0 12px;color:var(--mute)}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button,.btn{font:600 15px system-ui,sans-serif;border:1px solid var(--acc);background:var(--acc);color:var(--onacc);padding:10px 16px;border-radius:8px;cursor:pointer;min-height:44px}
+.alt{background:transparent;color:var(--acc)}
+input[type=text]{width:100%;font:600 28px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.2em;text-align:center;padding:12px;margin:8px 0;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+#code{font:800 44px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.2em;text-align:center;margin:8px 0;color:var(--acc)}
+#status{font-weight:600;margin-bottom:14px}
+#log{max-height:40vh;overflow:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.m{padding:8px 12px;border-radius:10px;max-width:88%;word-break:break-word;border:1px solid var(--line);background:var(--bg)}
+.m.me{align-self:flex-end;background:var(--acc);color:var(--onacc);border-color:var(--acc)}
+#msg{font:16px system-ui;letter-spacing:0;text-align:left;margin:0}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;width:0;background:var(--acc)}
+.hide{display:none}.err{color:var(--bad)}
+a{color:var(--acc);font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>PhoneLink</h1>
+<p>Send text and files between phone and PC. Same Wi‑Fi, no account.</p>
+<div id="status">Not connected</div>
+
+<div id="start" class="card">
+  <div class="row"><button id="bHost">Get a code</button><button id="bJoin" class="alt">Enter a code</button></div>
+</div>
+
+<div id="host" class="card hide">
+  <p>Type this code on the other device:</p>
+  <div id="code">…</div>
+</div>
+
+<div id="join" class="card hide">
+  <p>Enter the 5-digit code from the other device:</p>
+  <input type="text" id="codeIn" inputmode="numeric" maxlength="5" placeholder="00000" aria-label="Code">
+  <button id="bGo">Connect</button>
+</div>
+<p id="err" class="err" role="alert"></p>
+
+<div id="app" class="hide">
+  <div class="card">
+    <div id="log" aria-live="polite"></div>
+    <div class="row" style="flex-wrap:nowrap"><input type="text" id="msg" placeholder="Type or paste text" aria-label="Message"><button id="bSend">Send</button></div>
+  </div>
+  <div class="card">
+    <label class="btn alt" style="display:inline-block">Send files<input type="file" id="file" multiple class="hide"></label>
+    <div id="xfers"></div>
+  </div>
+</div>
+</main>
+<script>
+var $=function(i){return document.getElementById(i)},peer,conn,rx;
+function show(i,on){$(i).classList.toggle("hide",!on)}
+function err(t){$("err").textContent=t||""}
+function pid(c){return "phonelink-"+c}
+
+$("bHost").onclick=function(){show("start",false);show("host",true);host()};
+$("bJoin").onclick=function(){show("start",false);show("join",true);$("codeIn").focus()};
+
+function host(){
+  var c=String(10000+Math.floor(Math.random()*90000));
+  if(peer)peer.destroy();
+  peer=new Peer(pid(c));
+  peer.on("open",function(){$("code").textContent=c;$("status").textContent="Waiting for the other device…"});
+  peer.on("connection",setup);
+  peer.on("error",function(e){e.type==="unavailable-id"?host():err("Connection service unavailable. Reload and try again.")});
+}
+$("bGo").onclick=function(){
+  var c=$("codeIn").value.trim();if(c.length<5)return err("Enter all 5 digits.");
+  err("");$("status").textContent="Connecting…";
+  peer=new Peer();
+  peer.on("open",function(){setup(peer.connect(pid(c),{reliable:true}))});
+  peer.on("error",function(e){$("status").textContent="Not connected";err(e.type==="peer-unavailable"?"Code not found. Check the digits.":"Could not connect. Reload and try again.")});
+};
+function setup(c){
+  conn=c;
+  c.on("open",function(){["start","host","join"].forEach(function(i){show(i,false)});show("app",true);err("");$("status").textContent="Connected";add("Linked. Send text or files.")});
+  c.on("data",onData);
+  c.on("close",function(){$("status").textContent="Disconnected"});
+}
+function add(t,me){var d=document.createElement("div");d.className="m"+(me?" me":"");d.textContent=t;$("log").appendChild(d);$("log").scrollTop=1e9}
+function send(){var v=$("msg").value;if(!v||!conn)return;conn.send({t:"txt",v:v});add(v,1);$("msg").value=""}
+$("bSend").onclick=send;$("msg").onkeydown=function(e){if(e.key==="Enter")send()};
+
+function xfer(n){var b=document.createElement("div");b.style.marginTop="10px";var l=document.createElement("div");l.textContent=n;var r=document.createElement("div");r.className="bar";var i=document.createElement("i");r.appendChild(i);b.appendChild(l);b.appendChild(r);$("xfers").appendChild(b);return{l:l,set:function(p){i.style.width=p*100+"%"}}}
+function wait(ms){return new Promise(function(r){setTimeout(r,ms)})}
+$("file").onchange=async function(){
+  var fs=Array.from(this.files);this.value="";
+  for(var f of fs){
+    var u=xfer("Sending "+f.name),o=0,S=65536;
+    conn.send({t:"file",name:f.name,size:f.size,type:f.type});
+    while(o<f.size){
+      while(conn.dataChannel&&conn.dataChannel.bufferedAmount>4e6)await wait(20);
+      var b=await f.slice(o,o+S).arrayBuffer();conn.send(b);o+=b.byteLength;u.set(o/f.size);
+    }
+    conn.send({t:"end"});u.l.textContent="Sent "+f.name;
+  }
+};
+function onData(d){
+  if(d&&d.t==="txt")add(d.v);
+  else if(d&&d.t==="file")rx={m:d,p:[],g:0,u:xfer("Receiving "+d.name)};
+  else if(d&&d.t==="end"&&rx){
+    var a=document.createElement("a");a.href=URL.createObjectURL(new Blob(rx.p,{type:rx.m.type||"application/octet-stream"}));
+    a.download=rx.m.name;a.textContent="Save "+rx.m.name;rx.u.l.textContent="";rx.u.l.appendChild(a);rx.u.set(1);rx=null;
+  }else if(rx&&d&&d.byteLength!==undefined){rx.p.push(d);rx.g+=d.byteLength;rx.u.set(rx.g/rx.m.size)}
+}
+</script>
+</body>
+</html>
